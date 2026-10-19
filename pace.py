@@ -13,7 +13,7 @@ Fable has no official bar in the status line data, so its spend is computed
 from the local transcripts at list price and compared with its own half-week
 cap, calibrated on 2026-10-19 (/usage showed 21% for $58.7 of list-price use).
 """
-import datetime, glob, json, os, sys, time
+import datetime, glob, json, os, subprocess, sys, time
 
 HOME = os.path.expanduser("~")
 DIR = os.path.join(HOME, ".claude", "pace")
@@ -125,6 +125,66 @@ def fable_pct(week_start):
     return 100.0 * fable_week_usd(week_start) / cfg("fable_week_list_usd", DEFAULT_FABLE_CAP)
 
 
+BASELINE_UNITS_PER_STEP = 29800   # measured over the 30 days before the changes
+UNITS_CACHE = os.path.join(DIR, "units-24h.json")
+
+
+def refresh_units():
+    """Cost units per model call over the last 24 hours (input 1, output 5, read 0.1, write 1.25)."""
+    since = time.time() - 86400
+    seen, units, steps = set(), 0.0, 0
+    for path in glob.glob(os.path.join(PROJECTS, "**", "*.jsonl"), recursive=True):
+        try:
+            if os.path.getmtime(path) < since:
+                continue
+            with open(path, errors="ignore") as f:
+                for line in f:
+                    if '"assistant"' not in line or '"usage"' not in line:
+                        continue
+                    try:
+                        r = json.loads(line)
+                    except Exception:
+                        continue
+                    if r.get("type") != "assistant":
+                        continue
+                    m = r.get("message", {})
+                    u, mid = m.get("usage"), m.get("id")
+                    if not u or not mid or mid in seen:
+                        continue
+                    ts = r.get("timestamp")
+                    if not ts or datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() < since:
+                        continue
+                    seen.add(mid)
+                    steps += 1
+                    units += (u.get("input_tokens", 0) + 5 * u.get("output_tokens", 0)
+                              + 0.1 * u.get("cache_read_input_tokens", 0)
+                              + 1.25 * u.get("cache_creation_input_tokens", 0))
+        except Exception:
+            continue
+    os.makedirs(DIR, exist_ok=True)
+    with open(UNITS_CACHE, "w") as f:
+        json.dump({"at": time.time(), "steps": steps, "units": units}, f)
+
+
+def units_label():
+    """Read the cache; if stale, refresh in a detached process so the status line never waits."""
+    try:
+        with open(UNITS_CACHE) as f:
+            c = json.load(f)
+    except Exception:
+        c = None
+    if not c or time.time() - c.get("at", 0) > 600:
+        try:
+            subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "refresh"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception:
+            pass
+    if not c or c.get("steps", 0) < 50:
+        return None
+    ups = c["units"] / c["steps"]
+    return f"{ups / 1000:.0f}k units/step (was {BASELINE_UNITS_PER_STEP / 1000:.0f}k)"
+
+
 def mode_statusline(d):
     os.makedirs(DIR, exist_ok=True)
     rl = d.get("rate_limits") or {}
@@ -150,6 +210,12 @@ def mode_statusline(d):
             parts.append(f"fable {fable_pct(start):.0f}% of its cap")
         except Exception:
             pass
+    try:
+        lab = units_label()
+        if lab:
+            parts.append(lab)
+    except Exception:
+        pass
     print(" · ".join(parts))
 
 
@@ -235,6 +301,8 @@ if __name__ == "__main__":
             mode_guard_model(read_stdin())
         elif mode == "prompt":
             mode_prompt(read_stdin())
+        elif mode == "refresh":
+            refresh_units()
         elif mode == "calibrate":
             mode_calibrate(float(sys.argv[2]))
         else:

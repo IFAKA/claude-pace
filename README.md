@@ -8,7 +8,7 @@ If you keep seeing *"You've hit your weekly limit"* or *"You've hit your Opus li
 
 | Part | How it helps |
 |---|---|
-| **Status line** | Shows context size, the 5-hour bar, the weekly bar and how far ahead of an even pace you are, for example `wk 40% (+10 vs pace, ahead)`. Also shows how much of the Fable weekly cap is gone. |
+| **Status line** | Shows context size, the 5-hour bar, the weekly bar and how far ahead of an even pace you are, for example `wk 40% (+10 vs pace, ahead)`. Also shows how much of the Fable weekly cap is gone, and your units per step over the last 24 hours against the 30k baseline, so you see the savings without running anything. |
 | **Fable guard** (`PreModelSwitch` hook) | Refuses `/model fable` while your week, or Fable's own cap, is ahead of pace. On pace, the switch goes through. |
 | **Frugal mode** (`UserPromptSubmit` hook) | While ahead of pace, each prompt carries a short note asking Claude to avoid re-reading files, batch tool calls and skip subagents. On pace, nothing is injected, so capability is untouched. |
 | **`usage-units.py`** | Read-only report of your own transcripts: cost units per step, per day and per week. Use it to prove the savings. |
